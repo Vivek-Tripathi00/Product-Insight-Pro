@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Product Review Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .animate-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .review-card {
+            transition: all 0.3s ease;
+        }
+
+        .review-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+
+        .suspicious-review {
+            position: relative;
+        }
+
+        .suspicious-review::after {
+            content: "⚠️ Suspicious";
+            position: absolute;
+            top: 0;
+            right: 0;
+            background-color: #fef3c7;
+            color: #92400e;
+            padding: 2px 8px;
+            font-size: 12px;
+            border-radius: 0 0.375rem 0 0.375rem;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-50">
+    <div class="min-h-screen">
+        <!-- Header -->
+        <header class="bg-gradient-to-r from-blue-600 to-indigo-700 text-white shadow-lg">
+            <div class="container mx-auto px-4 py-6">
+                <div class="flex justify-between items-center">
+                    <h1 class="text-3xl font-bold">
+                        <i class="fas fa-chart-line mr-2"></i>Product Insight Pro
+                    </h1>
+                    <div class="flex space-x-4">
+                        <button id="theme-toggle" class="p-2 rounded-full bg-white bg-opacity-20 hover:bg-opacity-30">
+                            <i class="fas fa-moon"></i>
+                        </button>
+                        <a href="#" class="p-2 rounded-full bg-white bg-opacity-20 hover:bg-opacity-30">
+                            <i class="fas fa-question-circle"></i>
+                        </a>
+                    </div>
+                </div>
+                <p class="mt-2 opacity-90">Advanced e-commerce product analysis tool</p>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="container mx-auto px-4 py-8">
+            <!-- Search Section -->
+            <section class="mb-12 bg-white rounded-xl shadow-md p-6">
+                <h2 class="text-2xl font-semibold mb-4 text-gray-800">Analyze Product Reviews</h2>
+
+                <form method="POST" class="space-y-4">
+                    <div class="flex flex-col md:flex-row gap-4">
+                        <div class="flex-grow">
+                            <label for="product_url" class="block text-sm font-medium text-gray-700 mb-1">
+                                Product URL
+                            </label>
+                            <input type="text" name="product_url" id="product_url"
+                                placeholder="https://www.amazon.com/... or https://www.flipkart.com/..."
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div class="w-full md:w-48">
+                            <label for="platform" class="block text-sm font-medium text-gray-700 mb-1">
+                                Platform
+                            </label>
+                            <select name="platform" id="platform"
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                                <option value="amazon">Amazon</option>
+                                <option value="flipkart">Flipkart</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button type="submit"
+                        class="w-full md:w-auto px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition duration-200 flex items-center justify-center">
+                        <i class="fas fa-search mr-2"></i> Analyze Product
+                    </button>
+                </form>
+
+                {% if error %}
+                <div class="mt-4 p-4 bg-red-50 border-l-4 border-red-500 text-red-700">
+                    <p><i class="fas fa-exclamation-circle mr-2"></i> {{ error }}</p>
+                </div>
+                {% endif %}
+
+                {% if success %}
+                <div class="mt-4 p-4 bg-green-50 border-l-4 border-green-500 text-green-700">
+                    <p><i class="fas fa-check-circle mr-2"></i> {{ success }}</p>
+                </div>
+                {% endif %}
+            </section>
+
+            {% if sentiment_results %}
+            <!-- Results Section -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <!-- Left Column -->
+                <div class="lg:col-span-2 space-y-8">
+                    <!-- Product Summary -->
+                    <section class="bg-white rounded-xl shadow-md p-6">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-800">Product Summary</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div class="bg-blue-50 p-4 rounded-lg">
+                                <p class="text-sm text-blue-600">Current Price</p>
+                                <p class="text-2xl font-bold text-blue-800">
+                                    {% if current_price %}
+                                    ₹{{ "%.2f"|format(current_price) }}
+                                    {% else %}
+                                    N/A
+                                    {% endif %}
+                                </p>
+                            </div>
+                            <div class="bg-green-50 p-4 rounded-lg">
+                                <p class="text-sm text-green-600">Total Reviews</p>
+                                <p class="text-2xl font-bold text-green-800">
+                                    {{ sentiment_results.Positive + sentiment_results.Negative +
+                                    sentiment_results.Neutral }}
+                                </p>
+                            </div>
+                            <div class="bg-amber-50 p-4 rounded-lg">
+                                <p class="text-sm text-amber-600">Suspicious Reviews</p>
+                                <p class="text-2xl font-bold text-amber-800">
+                                    {{ fake_percentage }}%
+                                </p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Sentiment Analysis -->
+                    <section class="bg-white rounded-xl shadow-md p-6">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-800">Sentiment Analysis</h2>
+                        <div class="h-80">
+                            <canvas id="sentimentChart"></canvas>
+                        </div>
+                    </section>
+
+                    <!-- Word Cloud -->
+                    <section class="bg-white rounded-xl shadow-md p-6">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-800">Review Keywords</h2>
+                        <div class="flex justify-center">
+                            {% if wordcloud_path %}
+                            <img src="{{ wordcloud_path }}" alt="Word Cloud"
+                                class="rounded-lg shadow-sm max-w-full h-auto">
+                            {% else %}
+                            <p class="text-gray-500">No word cloud available</p>
+                            {% endif %}
+                        </div>
+                    </section>
+                </div>
+
+                <!-- Right Column -->
+                <div class="space-y-8">
+                    <!-- Review Highlights -->
+                    <section class="bg-white rounded-xl shadow-md p-6">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-800">Review Highlights</h2>
+                        <div class="space-y-4">
+                            <!-- Positive Highlight -->
+                            <div class="bg-green-50 border-l-4 border-green-500 p-4 rounded-r-lg">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <p class="font-medium text-green-800">Most Positive</p>
+                                        <p class="text-sm text-green-600 mt-1">
+                                            {% set positive_reviews = reviews|selectattr('Sentiment', 'equalto',
+                                            'Positive')|list %}
+                                            {% if positive_reviews %}
+                                            {{ positive_reviews[0]['Review'][:150] }}{% if
+                                            positive_reviews[0]['Review']|length > 150 %}...{% endif %}
+                                            {% else %}
+                                            No positive reviews found
+                                            {% endif %}
+                                        </p>
+                                    </div>
+                                    <span
+                                        class="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs font-medium">
+                                        {{ positive_reviews[0]['Rating'] if positive_reviews else '0' }}★
+                                    </span>
+                                </div>
+                            </div>
+
+                            <!-- Negative Highlight -->
+                            <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <p class="font-medium text-red-800">Most Negative</p>
+                                        <p class="text-sm text-red-600 mt-1">
+                                            {% set negative_reviews = reviews|selectattr('Sentiment', 'equalto',
+                                            'Negative')|list %}
+                                            {% if negative_reviews %}
+                                            {{ negative_reviews[0]['Review'][:150] }}{% if
+                                            negative_reviews[0]['Review']|length > 150 %}...{% endif %}
+                                            {% else %}
+                                            No negative reviews found
+                                            {% endif %}
+                                        </p>
+                                    </div>
+                                    <span class="bg-red-100 text-red-800 px-2 py-1 rounded-full text-xs font-medium">
+                                        {{ negative_reviews[0]['Rating'] if negative_reviews else '0' }}★
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Price Tracking -->
+                    <section class="bg-white rounded-xl shadow-md p-6">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-800">Price Tracking</h2>
+                        <div class="bg-gray-50 p-4 rounded-lg">
+                            <p class="text-sm text-gray-600 mb-2">Track this product's price over time</p>
+                            <button id="track-price-btn"
+                                class="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition duration-200 flex items-center justify-center">
+                                <i class="fas fa-bell mr-2"></i> Set Price Alert
+                            </button>
+                        </div>
+                    </section>
+
+
+                    <!-- Review Distribution -->
+                    <section class="bg-white rounded-xl shadow-md p-6">
+                        <h2 class="text-xl font-semibold mb-4 text-gray-800">Rating Distribution</h2>
+                        <div class="h-64">
+                            <canvas id="ratingChart"></canvas>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
+            <!-- Reviews Section -->
+            <section class="mt-12 bg-white rounded-xl shadow-md p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-semibold text-gray-800">Customer Reviews</h2>
+                    <div class="flex space-x-2">
+                        <button id="filter-positive" class="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm">
+                            Positive
+                        </button>
+                        <button id="filter-negative" class="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm">
+                            Negative
+                        </button>
+                        <button id="filter-all" class="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm">
+                            All
+                        </button>
+                    </div>
+                </div>
+
+                <div class="space-y-4" id="reviews-container">
+                    {% for review in reviews %}
+                    <div class="review-card p-4 border rounded-lg {% if review.Sentiment == 'Positive' %}bg-green-50 border-green-200{% elif review.Sentiment == 'Negative' %}bg-red-50 border-red-200{% else %}bg-gray-50 border-gray-200{% endif %} {% if review.get('IsSuspicious') %}suspicious-review{% endif %}"
+                        data-sentiment="{{ review.Sentiment }}">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <h3 class="font-medium text-gray-800">{{ review.Title }}</h3>
+                                <p class="text-gray-600 mt-1">{{ review.Review }}</p>
+                            </div>
+                            <div class="flex flex-col items-end">
+                                <div class="flex items-center mb-1">
+                                    {% for i in range(5) %}
+                                    {% if i < review.Rating %} <i class="fas fa-star text-yellow-400"></i>
+                                        {% else %}
+                                        <i class="far fa-star text-yellow-400"></i>
+                                        {% endif %}
+                                        {% endfor %}
+                                </div>
+                                <span class="text-xs text-gray-500">{{ review.Date }}</span>
+                            </div>
+                        </div>
+                        <div class="mt-2 flex justify-between items-center">
+                            <span class="text-sm text-gray-500">By {{ review.Reviewer }}</span>
+                            <span class="text-xs px-2 py-1 rounded-full 
+                                {% if review.Sentiment == 'Positive' %}bg-green-100 text-green-800
+                                {% elif review.Sentiment == 'Negative' %}bg-red-100 text-red-800
+                                {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {{ review.Sentiment }}
+                            </span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endif %}
+        </main>
+
+
+
+        <!-- News Letter -->
+       <center>
+            <div class="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
+                <div class="text-center mb-6">
+                    <img src="/static/images/logo.png" alt="Newsletter" class="w-46 mx-auto mb-4">
+                    <h2 class="text-2xl font-bold text-gray-800">Subscribe to our Newsletter</h2>
+                    <p class="text-gray-600 text-sm mt-2">Get updates, tips, and offers straight to your inbox ✉️</p>
+                </div>
+
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                {% for category, message in messages %}
+                <div class="text-sm mb-4 px-4 py-2 rounded 
+                                    {% if category == 'success' %}
+                                      bg-green-100 text-green-700
+                                    {% else %}
+                                      bg-red-100 text-red-700
+                                    {% endif %}">
+                    {{ message }}
+                </div>
+                {% endfor %}
+                {% endif %}
+                {% endwith %}
+
+                <form action="/subscribe" method="POST" class="space-y-4">
+                    <input type="email" name="email" placeholder="Enter your email" required
+                        class="w-full px-4 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <button type="submit"
+                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded transition duration-200">
+                        Subscribe
+                    </button>
+                </form>
+            </div>
+        </center>
+        <!-- Footer -->
+        <footer class="bg-gray-800 text-white py-8 mt-12">
+            <div class="container mx-auto px-4">
+                <div class="flex flex-col md:flex-row justify-between items-center">
+                    <div class="mb-4 md:mb-0">
+                        <h3 class="text-xl font-bold">Product Insight Pro</h3>
+                        <p class="text-gray-400 mt-1">Making smarter shopping decisions</p>
+                    </div>
+                    <div class="flex space-x-4">
+                        <a href="#" class="text-gray-400 hover:text-white">
+                            <i class="fab fa-github fa-lg"></i>
+                        </a>
+                        <a href="#" class="text-gray-400 hover:text-white">
+                            <i class="fab fa-twitter fa-lg"></i>
+                        </a>
+                        <a href="#" class="text-gray-400 hover:text-white">
+                            <i class="fab fa-linkedin fa-lg"></i>
+                        </a>
+                    </div>
+                </div>
+                <div class="border-t border-gray-700 mt-6 pt-6 text-center text-gray-400 text-sm">
+                    <p>© 2025 Product Insight Pro. All rights reserved.</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- JavaScript -->
+    <script>
+        // Dark mode toggle
+        const themeToggle = document.getElementById('theme-toggle');
+        const html = document.documentElement;
+
+        themeToggle.addEventListener('click', () => {
+            html.classList.toggle('dark');
+            if (html.classList.contains('dark')) {
+                themeToggle.innerHTML = '<i class="fas fa-sun"></i>';
+                localStorage.setItem('theme', 'dark');
+            } else {
+                themeToggle.innerHTML = '<i class="fas fa-moon"></i>';
+                localStorage.setItem('theme', 'light');
+            }
+        });
+
+        // Check for saved theme preference
+        if (localStorage.getItem('theme') === 'dark' ||
+            (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            html.classList.add('dark');
+            themeToggle.innerHTML = '<i class="fas fa-sun"></i>';
+        } else {
+            html.classList.remove('dark');
+            themeToggle.innerHTML = '<i class="fas fa-moon"></i>';
+        }
+
+        // Review filtering
+        const filterPositive = document.getElementById('filter-positive');
+        const filterNegative = document.getElementById('filter-negative');
+        const filterAll = document.getElementById('filter-all');
+        const reviewsContainer = document.getElementById('reviews-container');
+        const reviewCards = document.querySelectorAll('.review-card');
+
+        filterPositive.addEventListener('click', () => {
+            reviewCards.forEach(card => {
+                card.style.display = card.dataset.sentiment === 'Positive' ? 'block' : 'none';
+            });
+        });
+
+        filterNegative.addEventListener('click', () => {
+            reviewCards.forEach(card => {
+                card.style.display = card.dataset.sentiment === 'Negative' ? 'block' : 'none';
+            });
+        });
+
+        filterAll.addEventListener('click', () => {
+            reviewCards.forEach(card => {
+                card.style.display = 'block';
+            });
+        });
+
+        // Initialize charts if results exist
+        {% if sentiment_results %}
+        // Sentiment Chart
+        const sentimentCtx = document.getElementById('sentimentChart').getContext('2d');
+        const sentimentChart = new Chart(sentimentCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Positive', 'Negative', 'Neutral'],
+                datasets: [{
+                    data: [
+                        {{ sentiment_results.Positive }},
+                {{ sentiment_results.Negative }},
+                        {{ sentiment_results.Neutral }}
+                    ],
+        backgroundColor: [
+            '#10B981',
+            '#EF4444',
+            '#6B7280'
+        ],
+            borderWidth: 0
+                }]
+            },
+        options: {
+            responsive: true,
+                plugins: {
+                legend: {
+                    position: 'bottom',
+                    },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const value = context.raw;
+                            const percentage = Math.round((value / total) * 100);
+                            return `${context.label}: ${value} (${percentage}%)`;
+                        }
+                    }
+                }
+            },
+            cutout: '70%'
+        }
+        });
+
+        // Rating Chart
+        const ratingCtx = document.getElementById('ratingChart').getContext('2d');
+
+        // Calculate rating distribution
+        const ratingCounts = [0, 0, 0, 0, 0];
+        {% for review in reviews %}
+        ratingCounts[{{ review.Rating }} - 1]++;
+        {% endfor %}
+
+        const ratingChart = new Chart(ratingCtx, {
+            type: 'bar',
+            data: {
+                labels: ['1★', '2★', '3★', '4★', '5★'],
+                datasets: [{
+                    label: 'Number of Reviews',
+                    data: ratingCounts,
+                    backgroundColor: [
+                        '#EF4444',
+                        '#F59E0B',
+                        '#FBBF24',
+                        '#10B981',
+                        '#3B82F6'
+                    ],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            precision: 0
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+
+        // Price tracking button
+        document.getElementById('track-price-btn').addEventListener('click', () => {
+            alert('Price tracking feature will be implemented soon!');
+        });
+        {% endif %}
+    </script>
+</body>
+
+</html>
