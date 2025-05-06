@@ -1,49 +1,44 @@
 import os
 import re
-import time
-import sqlite3
-import atexit
-from datetime import datetime
-from functools import lru_cache
-
 import requests
 import joblib
-import pandas as pd
 import matplotlib.pyplot as plt
 import nltk
 from nltk.sentiment import SentimentIntensityAnalyzer
-from nltk.corpus import stopwords
 from bs4 import BeautifulSoup
 from flask import Flask, render_template, request, jsonify, session, flash, redirect, url_for
 from wordcloud import WordCloud
+from datetime import datetime
+import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.ensemble import IsolationForest
+import time
+from functools import lru_cache
 from flask_mail import Mail, Message
+import sqlite3
 from apscheduler.schedulers.background import BackgroundScheduler
+import atexit
 
 # Initialize Flask app
 app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY', 'fallback-secret-key-for-dev')
+app.secret_key = os.getenv('SECRET_KEY', 'your-secret-key-here')
 
-# Configuration
-app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp.gmail.com')
-app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))
+# NLTK Downloads
+nltk.download("vader_lexicon")
+nltk.download('stopwords')
+
+# Email Configuration
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
 app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_USERNAME')
-app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'true').lower() == 'true'
-app.config['MAIL_USE_SSL'] = os.getenv('MAIL_USE_SSL', 'false').lower() == 'true'
-
-# Initialize extensions
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USE_SSL'] = False
 mail = Mail(app)
 
-# NLTK Downloads
-nltk.download("vader_lexicon", quiet=True)
-nltk.download('stopwords', quiet=True)
-
-# Database Setup
+# Initialize Database
 def init_db():
-    """Initialize the SQLite database."""
     conn = sqlite3.connect('price_alerts.db')
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS price_alerts
@@ -60,11 +55,10 @@ def init_db():
 init_db()
 
 # Initialize Scheduler
-scheduler = BackgroundScheduler(daemon=True)
+scheduler = BackgroundScheduler()
 
 # Price Tracking Functions
 def track_price(url):
-    """Track product price from e-commerce URLs."""
     try:
         html_content = get_page_content(url, 'generic')
         if not html_content:
@@ -73,8 +67,8 @@ def track_price(url):
         soup = BeautifulSoup(html_content, "html.parser")
         
         # Amazon price extraction
-        price_span = (soup.find("span", class_="a-offscreen") or 
-                     soup.find("span", class_="a-price-whole"))
+        price_span = soup.find("span", class_="a-offscreen") or \
+                     soup.find("span", class_="a-price-whole")
         
         if price_span:
             price_text = price_span.get_text(strip=True)
@@ -82,68 +76,55 @@ def track_price(url):
             if price_match:
                 return float(price_match.group())
         
-        # Flipkart price extraction
-        price_div = (soup.find("div", class_="Nx9bqj") or 
-                    soup.find("div", class_="_30jeq3") or
-                    soup.find("div", class_="_16Jk6d") or
-                    soup.find("div", class_="_1vC4OE"))
+        # Flipkart price extraction - updated with new class names
+        price_div = soup.find("div", class_="Nx9bqj")  # Current price
+        if not price_div:
+            price_div = soup.find("div", class_="_30jeq3") or \
+                       soup.find("div", class_="_16Jk6d") or \
+                       soup.find("div", class_="_1vC4OE")
         
         if price_div:
             price_text = price_div.get_text(strip=True)
+            # Remove currency symbol and commas, then convert to float
             price_match = re.search(r'[\d,]+\.?\d*', price_text.replace('₹', '').replace(',', ''))
             if price_match:
                 return float(price_match.group())
             
         return None
     except Exception as e:
-        app.logger.error(f"Error extracting price: {e}")
+        print(f"Error extracting price: {e}")
         return None
-
 def check_price_alerts():
-    """Check price alerts and send notifications."""
     with app.app_context():
-        conn = None
-        try:
-            conn = sqlite3.connect('price_alerts.db')
-            c = conn.cursor()
-            c.execute("SELECT * FROM price_alerts WHERE is_active = 1")
-            alerts = c.fetchall()
+        conn = sqlite3.connect('price_alerts.db')
+        c = conn.cursor()
+        c.execute("SELECT * FROM price_alerts WHERE is_active = 1")
+        alerts = c.fetchall()
+        
+        for alert in alerts:
+            alert_id, email, product_url, target_price, _, _, _ = alert
+            current_price = track_price(product_url)
             
-            for alert in alerts:
-                alert_id, email, product_url, target_price, _, _, _ = alert
-                current_price = track_price(product_url)
-                
-                if current_price and current_price <= target_price:
-                    try:
-                        msg = Message('Price Alert!',
-                                    recipients=[email])
-                        msg.body = (f"The price for your tracked product has dropped to ₹{current_price} "
-                                    f"(your target: ₹{target_price}).\n\nProduct URL: {product_url}")
-                        mail.send(msg)
-                        c.execute("UPDATE price_alerts SET is_active = 0 WHERE id = ?", (alert_id,))
-                        conn.commit()
-                    except Exception as e:
-                        app.logger.error(f"Error sending price alert email: {e}")
-        except Exception as e:
-            app.logger.error(f"Error in check_price_alerts: {e}")
-        finally:
-            if conn:
-                conn.close()
+            if current_price and current_price <= target_price:
+                try:
+                    msg = Message('Price Alert!',
+                                recipients=[email])
+                    msg.body = f"The price for your tracked product has dropped to ₹{current_price} (your target: ₹{target_price}).\n\nProduct URL: {product_url}"
+                    mail.send(msg)
+                    c.execute("UPDATE price_alerts SET is_active = 0 WHERE id = ?", (alert_id,))
+                    conn.commit()
+                except Exception as e:
+                    print(f"Error sending price alert email: {e}")
+        conn.close()
 
 # Start scheduler
 if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-    scheduler.add_job(
-        func=check_price_alerts,
-        trigger='interval',
-        hours=6,
-        misfire_grace_time=3600
-    )
+    scheduler.add_job(check_price_alerts, 'interval', hours=6)
     scheduler.start()
     atexit.register(lambda: scheduler.shutdown())
 
 # Web Scraping Functions
 def get_page_content(url, platform):
-    """Get HTML content of a page with retries."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
         "Accept-Language": "en-US,en;q=0.9",
@@ -155,100 +136,60 @@ def get_page_content(url, platform):
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            response = requests.get(
-                url,
-                headers=headers,
-                timeout=10,
-                allow_redirects=True
-            )
+            response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
             
             if platform == 'amazon' and "Sorry, we just need to make sure you're not a robot" in response.text:
                 raise Exception("Amazon bot detection triggered")
                 
             return response.text
-        except requests.exceptions.RequestException as e:
-            app.logger.warning(f"Attempt {attempt + 1} failed: {str(e)}")
+        except Exception as e:
+            print(f"Attempt {attempt + 1} failed: {str(e)}")
             if attempt == max_retries - 1:
                 raise
             time.sleep(2 ** attempt)
     return None
 
 def scrape_flipkart_reviews(url, num_reviews=50):
-    """Scrape product reviews from Flipkart with better error handling."""
     reviews = []
     page = 1
 
     while len(reviews) < num_reviews:
         page_url = f"{url}&page={page}"
-        app.logger.info(f"Scraping: {page_url}")
+        print(f"Scraping: {page_url}")
         
         try:
             html_content = get_page_content(page_url, 'flipkart')
             if not html_content:
-                app.logger.warning("No HTML content received")
                 break
 
             soup = BeautifulSoup(html_content, "html.parser")
-            
-            # Try multiple possible review container classes
-            review_blocks = []
-            for class_name in ["cPHDOP col-12-12", "_1AtVbE col-12-12", "col _2wzgFH"]:
-                review_blocks = soup.find_all("div", class_=class_name)
-                if review_blocks:
-                    break
+            review_blocks = soup.find_all("div", class_="cPHDOP col-12-12")
 
             if not review_blocks:
-                app.logger.info("No reviews found on this page.")
+                print("No reviews found on this page.")
                 break
 
             for review_block in review_blocks:
                 try:
-                    # Rating extraction with multiple possible selectors
-                    rating_tag = None
-                    for class_name in ["XQDdHH Ga3i8K", "_3LWZlK", "_2_R_DZ"]:
-                        rating_tag = review_block.find("div", class_=class_name)
-                        if rating_tag:
-                            break
-                    
+                    rating_tag = review_block.find("div", class_="XQDdHH Ga3i8K")
                     rating_text = rating_tag.get_text(strip=True) if rating_tag else "0"
                     rating = int(float(re.search(r'\d+', rating_text).group())) if re.search(r'\d+', rating_text) else 0
 
-                    # Title extraction with multiple possible selectors
-                    title_tag = None
-                    for class_name in ["z9E0IG", "_2-N8zT", "qwjRop"]:
-                        title_tag = review_block.find("p", class_=class_name)
-                        if title_tag:
-                            break
+                    title_tag = review_block.find("p", class_="z9E0IG")
                     title = title_tag.get_text(strip=True) if title_tag else "No Title"
 
-                    # Review text extraction with multiple possible selectors
-                    review_text_tag = None
-                    for class_name in ["ZmyHeo", "t-ZTKy", ""]:  # Empty string for direct div
-                        if class_name:
-                            review_text_tag = review_block.find("div", class_=class_name)
-                        else:
-                            review_text_tag = review_block.find("div", recursive=False)
-                        if review_text_tag:
-                            break
+                    review_text_tag = review_block.find("div", class_="ZmyHeo").find("div", class_="")
                     review_text = review_text_tag.get_text(strip=True) if review_text_tag else "No Review Text"
 
-                    # Reviewer name extraction
-                    name_tag = None
-                    for class_name in ["_2NsDsF AwS1CA", "_2sc7ZR", "_3L3u8V"]:
-                        name_tag = review_block.find("p", class_=class_name)
-                        if name_tag:
-                            break
+                    name_tag = review_block.find("p", class_="_2NsDsF AwS1CA")
                     reviewer_name = name_tag.get_text(strip=True) if name_tag else "Anonymous"
 
-                    # Date and location extraction
-                    date_location = "Unknown"
-                    date_tag = None
-                    for class_name in ["_2mcZGG", "_3n8q9l"]:
-                        date_tag = review_block.find("p", class_=class_name)
-                        if date_tag:
-                            date_location = date_tag.get_text(strip=True)
-                            break
+                    date_location_tag = review_block.find("p", class_="MztJPv")
+                    date_location = date_location_tag.get_text(strip=True) if date_location_tag else "Unknown"
+
+                    date_tag = date_location_tag.find_next_sibling("p")
+                    date = date_tag.get_text(strip=True) if date_tag else "Unknown Date"
 
                     reviews.append({
                         "Rating": rating,
@@ -256,7 +197,7 @@ def scrape_flipkart_reviews(url, num_reviews=50):
                         "Review": review_text,
                         "Reviewer": reviewer_name,
                         "Location": date_location,
-                        "Date": date_location,  # Flipkart often combines date and location
+                        "Date": date,
                         "Platform": "Flipkart"
                     })
 
@@ -264,30 +205,24 @@ def scrape_flipkart_reviews(url, num_reviews=50):
                         break
 
                 except Exception as e:
-                    app.logger.error(f"Error extracting review (but continuing): {e}")
-                    continue  # Skip this review but continue with others
-
-            # Check if we've hit the last page
-            next_button = soup.find("a", class_="_1LKTO3")
-            if not next_button or "disabled" in next_button.get("class", []):
-                break
+                    print(f"Error extracting review: {e}")
 
             page += 1
-            time.sleep(2)  # Increased delay to be more polite
+            time.sleep(1)
 
         except Exception as e:
-            app.logger.error(f"Error scraping page (stopping): {e}")
+            print(f"Error scraping page: {e}")
             break
 
     return reviews
+
 def scrape_amazon_reviews(url, num_reviews=50):
-    """Scrape product reviews from Amazon."""
     reviews = []
     page = 1
 
     while len(reviews) < num_reviews:
         page_url = f"{url}&pageNumber={page}"
-        app.logger.info(f"Scraping: {page_url}")
+        print(f"Scraping: {page_url}")
         
         try:
             html_content = get_page_content(page_url, 'amazon')
@@ -298,7 +233,7 @@ def scrape_amazon_reviews(url, num_reviews=50):
             review_blocks = soup.find_all("div", {"data-hook": "review"})
 
             if not review_blocks:
-                app.logger.info("No reviews found on this page.")
+                print("No reviews found on this page.")
                 break
 
             for review_block in review_blocks:
@@ -338,13 +273,13 @@ def scrape_amazon_reviews(url, num_reviews=50):
                         break
 
                 except Exception as e:
-                    app.logger.error(f"Error extracting review: {e}")
+                    print(f"Error extracting review: {e}")
 
             page += 1
-            time.sleep(1)  # Be polite with requests
+            time.sleep(1)
 
         except Exception as e:
-            app.logger.error(f"Error scraping page: {e}")
+            print(f"Error scraping page: {e}")
             break
 
     return reviews
@@ -352,11 +287,9 @@ def scrape_amazon_reviews(url, num_reviews=50):
 # Sentiment Analysis Functions
 @lru_cache(maxsize=128)
 def get_sentiment_analyzer():
-    """Get cached sentiment analyzer instance."""
     return SentimentIntensityAnalyzer()
 
 def analyze_reviews(reviews):
-    """Perform sentiment analysis on reviews."""
     sia = get_sentiment_analyzer()
     sentiment_results = {"Positive": 0, "Negative": 0, "Neutral": 0}
     word_list = []
@@ -380,29 +313,22 @@ def analyze_reviews(reviews):
         word_list.extend(re.findall(r"\b[a-z]{3,}\b", text.lower()))
         review_texts.append(text)
     
-    # Detect suspicious reviews if we have enough data
     if len(review_texts) > 10:
-        try:
-            vectorizer = TfidfVectorizer(max_features=1000, stop_words='english')
-            X = vectorizer.fit_transform(review_texts)
-            clf = IsolationForest(contamination=0.1, random_state=42)
-            predictions = clf.fit_predict(X)
-            for i, review in enumerate(reviews):
-                review["IsSuspicious"] = predictions[i] == -1
-        except Exception as e:
-            app.logger.error(f"Error in fake review detection: {e}")
-            for review in reviews:
-                review["IsSuspicious"] = False
+        vectorizer = TfidfVectorizer(max_features=1000, stop_words='english')
+        X = vectorizer.fit_transform(review_texts)
+        clf = IsolationForest(contamination=0.1)
+        predictions = clf.fit_predict(X)
+        for i, review in enumerate(reviews):
+            review["IsSuspicious"] = predictions[i] == -1
     
     return sentiment_results, word_list, reviews
 
 def generate_wordcloud(words):
-    """Generate a word cloud from review text."""
-    stop_words = set(stopwords.words('english'))
+    stopwords = set(nltk.corpus.stopwords.words('english'))
     custom_stopwords = {'product', 'item', 'good', 'great', 'bad', 'like', 'one', 'use', 'would'}
-    stop_words.update(custom_stopwords)
+    stopwords.update(custom_stopwords)
     
-    filtered_words = [word for word in words if word not in stop_words]
+    filtered_words = [word for word in words if word not in stopwords]
     
     wordcloud = WordCloud(
         width=1200,
@@ -415,17 +341,13 @@ def generate_wordcloud(words):
     ).generate(" ".join(filtered_words))
     
     wordcloud_path = "static/wordcloud.png"
-    if not os.path.exists('static'):
-        os.makedirs('static')
     wordcloud.to_file(wordcloud_path)
     return wordcloud_path
 
 # Routes
 @app.route("/set_price_alert", methods=["POST"])
 def set_price_alert():
-    """Handle price alert form submission."""
     if request.method == "POST":
-        conn = None
         try:
             email = request.form.get("email")
             target_price = float(request.form.get("target_price"))
@@ -443,29 +365,20 @@ def set_price_alert():
             
             conn = sqlite3.connect('price_alerts.db')
             c = conn.cursor()
-            c.execute("""INSERT INTO price_alerts 
-                      (email, product_url, target_price, current_price, last_checked) 
-                      VALUES (?, ?, ?, ?, datetime('now'))""",
+            c.execute("INSERT INTO price_alerts (email, product_url, target_price, current_price, last_checked) VALUES (?, ?, ?, ?, datetime('now'))",
                       (email, product_url, target_price, current_price))
             conn.commit()
+            conn.close()
             
             flash(f"Price alert set! We'll notify you when the price drops below ₹{target_price}", "success")
             return redirect(url_for('index'))
             
-        except ValueError:
-            flash("Please enter a valid target price", "danger")
-            return redirect(url_for('index'))
         except Exception as e:
-            app.logger.error(f"Error setting price alert: {str(e)}")
-            flash("Error setting price alert. Please try again.", "danger")
+            flash(f"Error setting price alert: {str(e)}", "danger")
             return redirect(url_for('index'))
-        finally:
-            if conn:
-                conn.close()
 
 @app.route('/subscribe', methods=['POST'])
 def handle_subscription():
-    """Handle newsletter subscriptions."""
     email = request.form['email']
     try:
         msg = Message('Newsletter Subscription', recipients=[email])
@@ -513,13 +426,11 @@ def handle_subscription():
         mail.send(msg)
         flash('Subscription successful! A confirmation email has been sent.', 'success')
     except Exception as e:
-        app.logger.error(f'Error sending subscription email: {str(e)}')
-        flash('An error occurred while processing your subscription. Please try again.', 'danger')
+        flash(f'An error occurred: {str(e)}', 'danger')
     return redirect(url_for('index'))
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    """Main application route."""
     if request.method == "POST":
         if 'set_alert' in request.form:
             return set_price_alert()
@@ -558,7 +469,7 @@ def index():
                 total_ratings = sum(review.get('Rating', 0) for review in analyzed_reviews)
                 valid_reviews = sum(1 for review in analyzed_reviews if review.get('Rating') is not None)
                 if valid_reviews > 0:
-                    avg_rating = round(total_ratings / valid_reviews, 1)
+                    avg_rating = total_ratings / valid_reviews
             
             return render_template(
                 "index.html",
@@ -572,18 +483,15 @@ def index():
             )
             
         except Exception as e:
-            app.logger.error(f"Error during analysis: {e}")
+            print(f"Error during analysis: {e}")
             return render_template("index.html", error=f"Analysis failed: {str(e)}")
     
     return render_template("index.html")
 
+
 @app.route("/api/analyze", methods=["POST"])
 def api_analyze():
-    """API endpoint for review analysis."""
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "No JSON data provided"}), 400
-        
+    data = request.json
     product_url = data.get("product_url")
     platform = data.get("platform")
     
@@ -610,7 +518,7 @@ def api_analyze():
             total_ratings = sum(review.get('Rating', 0) for review in analyzed_reviews)
             valid_reviews = sum(1 for review in analyzed_reviews if review.get('Rating') is not None)
             if valid_reviews > 0:
-                avg_rating = round(total_ratings / valid_reviews, 1)
+                avg_rating = total_ratings / valid_reviews
         
         return jsonify({
             "reviews": analyzed_reviews,
@@ -621,9 +529,9 @@ def api_analyze():
         })
         
     except Exception as e:
-        app.logger.error(f"API error: {str(e)}")
         return jsonify({"error": str(e)}), 500
+import os
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port, debug=os.environ.get('DEBUG', 'false').lower() == 'true')
+    app.run(host='0.0.0.0', port=port)
